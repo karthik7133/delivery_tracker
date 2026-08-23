@@ -36,11 +36,11 @@ app.get("/health", (_req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/agent", agentRoutes);
-app.use("/api/admin", adminRoutes);
-app.use("/api/admin/zones", zoneRoutes);
-app.use("/api/admin/rate-cards", rateCardRoutes);
-app.use("/api", trackingRoutes);
 app.use("/api/agent", uploadRoutes);
+app.use("/api/admin/zones", zoneRoutes);       // must be before /api/admin
+app.use("/api/admin/rate-cards", rateCardRoutes); // must be before /api/admin
+app.use("/api/admin", adminRoutes);
+app.use("/api", trackingRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ success: false, message: "Route not found" });
