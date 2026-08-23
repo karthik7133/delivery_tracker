@@ -83,10 +83,15 @@ async function sendBrevoEmail({ to, subject, html }) {
  * Send an email via Nodemailer SMTP, Brevo API, or Resend API.
  */
 async function sendEmail({ to, subject, html }) {
+  // Option 1: Brevo HTTP API (HTTPS Port 443 — 100% reliable on Render free tier, zero timeouts!)
+  if (process.env.BREVO_API_KEY) {
+    return await sendBrevoEmail({ to, subject, html });
+  }
+
   const user = process.env.EMAIL_USER;
   const pass = process.env.EMAIL_PASSWORD || process.env.EMAIL_PASS;
 
-  // Option 1: Nodemailer SMTP
+  // Option 2: Nodemailer SMTP
   if (user && pass) {
     const from = process.env.EMAIL_FROM || `SwiftKart <${user}>`;
     const primaryPort = Number(process.env.EMAIL_PORT) || 465;
@@ -105,7 +110,7 @@ async function sendEmail({ to, subject, html }) {
     } catch (err) {
       console.error(`[EMAIL] Nodemailer Port ${primaryPort} Error:`, err.message);
 
-      // If port 587 timed out, auto-retry on SSL port 465 (works on cloud hosts like Render)
+      // If port 587 timed out, auto-retry on SSL port 465
       if (primaryPort !== 465 && (err.code === "ETIMEDOUT" || err.message.includes("timeout"))) {
         console.log(`[EMAIL] Port ${primaryPort} timed out. Retrying automatically on SSL Port 465...`);
         try {
@@ -120,17 +125,12 @@ async function sendEmail({ to, subject, html }) {
           return { messageId: info.messageId };
         } catch (retryErr) {
           console.error("[EMAIL] Nodemailer Port 465 Retry Error:", retryErr.message);
-          throw new AppError(`SMTP Email Error (Port 465): ${retryErr.message}`, 502);
+          throw new AppError(`SMTP Timeout: Render free tier firewalled TCP SMTP. Please set BREVO_API_KEY for 100% reliable HTTP email. Details: ${retryErr.message}`, 502);
         }
       }
 
       throw new AppError(`SMTP Email Error: ${err.message}`, 502);
     }
-  }
-
-  // Option 2: Brevo HTTP API
-  if (process.env.BREVO_API_KEY) {
-    return await sendBrevoEmail({ to, subject, html });
   }
 
   // Option 3: Resend API
