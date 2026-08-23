@@ -8,8 +8,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       {/* 3D Background */}
       <PackageScene />
 
-      {/* Subtle gradient overlay */}
+      {/* Layered overlay scrim: keeps background visible but tames it behind panels */}
       <div className="fixed inset-0 z-0 pointer-events-none">
+        {/* Base dark scrim so the 3D bg never blows out text */}
+        <div className="absolute inset-0 bg-slate-950/55" />
+        {/* Subtle colour tint */}
         <div className="absolute inset-0 bg-gradient-to-br from-emerald-950/20 via-transparent to-sky-950/20" />
       </div>
 

@@ -50,25 +50,43 @@
 }
 
 @layer utilities {
+  /* ── Glass Panels ─────────────────────────────────────────────────── */
+  /* Light frosted glass — cards, chips */
   .glass {
-    background: rgba(255, 255, 255, 0.05);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(8, 18, 40, 0.60);
+    backdrop-filter: blur(28px) saturate(180%);
+    -webkit-backdrop-filter: blur(28px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: 0 4px 32px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255,255,255,0.07);
   }
 
+  /* Darker frosted glass — sidebars, overlays */
   .glass-dark {
-    background: rgba(2, 6, 23, 0.7);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
+    background: rgba(2, 6, 23, 0.82);
+    backdrop-filter: blur(32px) saturate(160%);
+    -webkit-backdrop-filter: blur(32px) saturate(160%);
     border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255,255,255,0.05);
   }
 
+  /* Stronger frosted glass — modals, emphasis panels */
   .glass-strong {
-    background: rgba(255, 255, 255, 0.08);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
-    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: rgba(12, 24, 54, 0.75);
+    backdrop-filter: blur(40px) saturate(200%);
+    -webkit-backdrop-filter: blur(40px) saturate(200%);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    box-shadow: 0 8px 48px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255,255,255,0.10);
+  }
+
+  /* Full content panel — wraps large page sections */
+  .panel {
+    background: rgba(4, 10, 28, 0.72);
+    backdrop-filter: blur(36px) saturate(170%);
+    -webkit-backdrop-filter: blur(36px) saturate(170%);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255,255,255,0.06);
+    border-radius: 1rem;
+    padding: 1.5rem;
   }
 
   .glow-emerald {
@@ -81,6 +99,20 @@
 
   .glow-text-emerald {
     text-shadow: 0 0 30px rgba(16, 185, 129, 0.5);
+  }
+
+  /* Subtle shadow that lifts text off any busy background */
+  .text-crisp {
+    text-shadow: 0 1px 8px rgba(0, 0, 0, 0.7), 0 0 2px rgba(0, 0, 0, 0.5);
+  }
+
+  /* Alternating frosted rows for tables */
+  .table-row-glass:nth-child(even) {
+    background: rgba(255, 255, 255, 0.03);
+  }
+  .table-row-glass:hover {
+    background: rgba(16, 185, 129, 0.06);
+    transition: background 0.2s ease;
   }
 
   .gradient-text {
