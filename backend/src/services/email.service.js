@@ -11,8 +11,12 @@ function createTransporter() {
     throw new AppError("Email service is not configured. Contact support.", 503);
   }
   return nodemailer.createTransport({
-    service: "gmail",
+    host: "smtp.gmail.com",
+    port: 587,
+    secure: false,       // use STARTTLS (port 587), NOT SSL (port 465)
+    requireTLS: true,
     auth: { user, pass },
+    tls: { rejectUnauthorized: false },
   });
 }
 

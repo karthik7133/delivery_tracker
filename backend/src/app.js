@@ -14,6 +14,7 @@ import trackingRoutes from "./routes/tracking.routes.js";
 import uploadRoutes from "./routes/upload.routes.js";
 
 const app = express();
+app.set('trust proxy', 1); // Required for Render / any reverse-proxy host
 
 app.use(helmet());
 app.use(cors());
