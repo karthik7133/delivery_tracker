@@ -5,13 +5,13 @@ import Otp from "../models/Otp.js";
 import { AppError } from "../middleware/error.middleware.js";
 
 /* ── Dynamic Transporter selection ── */
-function getTransporter() {
+function createNodemailerTransporter(portOverride) {
   const user = process.env.EMAIL_USER;
   const pass = process.env.EMAIL_PASSWORD || process.env.EMAIL_PASS;
 
   if (user && pass) {
     const host = process.env.EMAIL_HOST || "smtp.gmail.com";
-    const port = Number(process.env.EMAIL_PORT) || 587;
+    const port = portOverride || Number(process.env.EMAIL_PORT) || 465;
     const secure = port === 465;
 
     return nodemailer.createTransport({
@@ -22,6 +22,7 @@ function getTransporter() {
         user: user.trim(),
         pass: pass.trim(),
       },
+      connectionTimeout: 8000,
     });
   }
   return null;
@@ -39,6 +40,8 @@ const activeUser = process.env.EMAIL_USER;
 const activePass = process.env.EMAIL_PASSWORD || process.env.EMAIL_PASS;
 if (activeUser && activePass) {
   console.log(`[EMAIL SERVICE] Configured to use Nodemailer SMTP (${activeUser})`);
+} else if (process.env.BREVO_API_KEY) {
+  console.log(`[EMAIL SERVICE] Configured to use Brevo API`);
 } else if (process.env.RESEND_API_KEY) {
   console.log(`[EMAIL SERVICE] Configured to use Resend API`);
 } else {
@@ -46,17 +49,52 @@ if (activeUser && activePass) {
 }
 
 /**
- * Send an email via Nodemailer SMTP or Resend API.
+ * Send email via Brevo REST API (HTTPS port 443 — never blocked on Render).
+ */
+async function sendBrevoEmail({ to, subject, html }) {
+  const apiKey = process.env.BREVO_API_KEY.trim();
+  const senderEmail = process.env.EMAIL_USER || "chkarthik853@gmail.com";
+  const senderName = "SwiftKart";
+
+  const res = await fetch("https://api.brevo.com/v3/smtp/email", {
+    method: "POST",
+    headers: {
+      "accept": "application/json",
+      "api-key": apiKey,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      sender: { name: senderName, email: senderEmail },
+      to: [{ email: to }],
+      subject: subject,
+      htmlContent: html,
+    }),
+  });
+
+  const data = await res.json();
+  if (!res.ok) {
+    throw new AppError(`Brevo API Error: ${data.message || "Failed to send email"}`, 502);
+  }
+  console.log(`[EMAIL] Brevo API sent to ${to} (ID: ${data.messageId})`);
+  return { messageId: data.messageId };
+}
+
+/**
+ * Send an email via Nodemailer SMTP, Brevo API, or Resend API.
  */
 async function sendEmail({ to, subject, html }) {
-  const nodemailerTransporter = getTransporter();
+  const user = process.env.EMAIL_USER;
+  const pass = process.env.EMAIL_PASSWORD || process.env.EMAIL_PASS;
 
-  if (nodemailerTransporter) {
-    const user = process.env.EMAIL_USER;
+  // Option 1: Nodemailer SMTP
+  if (user && pass) {
     const from = process.env.EMAIL_FROM || `SwiftKart <${user}>`;
+    const primaryPort = Number(process.env.EMAIL_PORT) || 465;
+    const transporter = createNodemailerTransporter(primaryPort);
+
     try {
-      console.log(`[EMAIL] Sending email via Nodemailer to ${to}...`);
-      const info = await nodemailerTransporter.sendMail({
+      console.log(`[EMAIL] Sending email via Nodemailer (Port ${primaryPort}) to ${to}...`);
+      const info = await transporter.sendMail({
         from,
         to,
         subject,
@@ -65,15 +103,37 @@ async function sendEmail({ to, subject, html }) {
       console.log(`[EMAIL] Nodemailer successfully sent to ${to} (Message ID: ${info.messageId})`);
       return { messageId: info.messageId };
     } catch (err) {
-      console.error("[EMAIL] Nodemailer SMTP Error:", err.message);
-      // If RESEND_API_KEY is not set, throw SMTP error directly
-      if (!process.env.RESEND_API_KEY) {
-        throw new AppError(`SMTP Email Error: ${err.message}`, 502);
+      console.error(`[EMAIL] Nodemailer Port ${primaryPort} Error:`, err.message);
+
+      // If port 587 timed out, auto-retry on SSL port 465 (works on cloud hosts like Render)
+      if (primaryPort !== 465 && (err.code === "ETIMEDOUT" || err.message.includes("timeout"))) {
+        console.log(`[EMAIL] Port ${primaryPort} timed out. Retrying automatically on SSL Port 465...`);
+        try {
+          const sslTransporter = createNodemailerTransporter(465);
+          const info = await sslTransporter.sendMail({
+            from,
+            to,
+            subject,
+            html,
+          });
+          console.log(`[EMAIL] Nodemailer (Port 465) successfully sent to ${to} (Message ID: ${info.messageId})`);
+          return { messageId: info.messageId };
+        } catch (retryErr) {
+          console.error("[EMAIL] Nodemailer Port 465 Retry Error:", retryErr.message);
+          throw new AppError(`SMTP Email Error (Port 465): ${retryErr.message}`, 502);
+        }
       }
-      console.warn("[EMAIL] Nodemailer failed, trying Resend API fallback...");
+
+      throw new AppError(`SMTP Email Error: ${err.message}`, 502);
     }
   }
 
+  // Option 2: Brevo HTTP API
+  if (process.env.BREVO_API_KEY) {
+    return await sendBrevoEmail({ to, subject, html });
+  }
+
+  // Option 3: Resend API
   const resend = getResend();
   if (resend) {
     console.log(`[EMAIL] Sending email via Resend to ${to}...`);
@@ -95,7 +155,7 @@ async function sendEmail({ to, subject, html }) {
   }
 
   throw new AppError(
-    "Email service is not configured. Please set EMAIL_USER and EMAIL_PASSWORD (or EMAIL_PASS) in Render Environment Variables.",
+    "Email service is not configured. Please set EMAIL_USER and EMAIL_PASS in Render Environment Variables.",
     503
   );
 }
