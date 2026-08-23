@@ -1,17 +1,78 @@
+import nodemailer from "nodemailer";
 import { Resend } from "resend";
 import crypto from "crypto";
 import Otp from "../models/Otp.js";
 import { AppError } from "../middleware/error.middleware.js";
 
-/* ── Resend client (HTTP API — works on Render free tier) ── */
-function getResend() {
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) throw new AppError("Email service is not configured. Contact support.", 503);
-  return new Resend(apiKey);
+/* ── Dynamic Transporter selection ── */
+function getTransporter() {
+  if (process.env.EMAIL_USER && process.env.EMAIL_PASSWORD) {
+    const host = process.env.EMAIL_HOST || "smtp.gmail.com";
+    const port = Number(process.env.EMAIL_PORT) || 587;
+    const secure = port === 465;
+
+    return nodemailer.createTransport({
+      host,
+      port,
+      secure,
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASSWORD,
+      },
+    });
+  }
+  return null;
 }
 
-/* ── Sender address — use onboarding@resend.dev until your domain is verified ── */
-const FROM = process.env.RESEND_FROM || "SwiftKart <onboarding@resend.dev>";
+function getResend() {
+  if (process.env.RESEND_API_KEY) {
+    return new Resend(process.env.RESEND_API_KEY);
+  }
+  return null;
+}
+
+/**
+ * Send an email via Nodemailer SMTP or Resend API.
+ */
+async function sendEmail({ to, subject, html }) {
+  const nodemailerTransporter = getTransporter();
+
+  if (nodemailerTransporter) {
+    const from = process.env.EMAIL_FROM || `SwiftKart <${process.env.EMAIL_USER}>`;
+    const info = await nodemailerTransporter.sendMail({
+      from,
+      to,
+      subject,
+      html,
+    });
+    console.log(`[EMAIL] Nodemailer sent to ${to} (Message ID: ${info.messageId})`);
+    return { messageId: info.messageId };
+  }
+
+  const resend = getResend();
+  if (resend) {
+    const from = process.env.RESEND_FROM || "SwiftKart <onboarding@resend.dev>";
+    const { data, error } = await resend.emails.send({
+      from,
+      to,
+      subject,
+      html,
+    });
+
+    if (error) {
+      console.error("[EMAIL] Resend error:", error);
+      throw new AppError(`Failed to send email via Resend: ${error.message}`, 502);
+    }
+
+    console.log(`[EMAIL] Resend sent to ${to} (ID: ${data.id})`);
+    return { messageId: data.id };
+  }
+
+  throw new AppError(
+    "Email service is not configured. Please set EMAIL_USER & EMAIL_PASSWORD or RESEND_API_KEY.",
+    503
+  );
+}
 
 /* ── Generate a cryptographically random 6-digit OTP ── */
 function generateOtp() {
@@ -33,10 +94,7 @@ export async function sendOtpEmail(email) {
   // Persist OTP (expires automatically via TTL index)
   await Otp.create({ email: normalizedEmail, otp });
 
-  const resend = getResend();
-
-  const { data, error } = await resend.emails.send({
-    from: FROM,
+  const result = await sendEmail({
     to: normalizedEmail,
     subject: "Your SwiftKart Verification Code",
     html: `
@@ -67,13 +125,7 @@ export async function sendOtpEmail(email) {
     `,
   });
 
-  if (error) {
-    console.error("[EMAIL] Resend error:", error);
-    throw new AppError(`Failed to send OTP email: ${error.message}`, 502);
-  }
-
-  console.log(`[EMAIL] OTP sent to ${normalizedEmail} — id: ${data.id}`);
-  return { messageId: data.id };
+  return result;
 }
 
 /**
@@ -102,7 +154,6 @@ export async function verifyOtpEmail(email, otp) {
  */
 export async function sendTransitNotificationEmail(email, { orderId, status, note }) {
   try {
-    const resend = getResend();
     const statusLabel = {
       PICKED_UP: "📦 Picked Up",
       IN_TRANSIT: "🚛 In Transit",
@@ -110,8 +161,7 @@ export async function sendTransitNotificationEmail(email, { orderId, status, not
       DELIVERED: "✅ Delivered",
     }[status] || status;
 
-    await resend.emails.send({
-      from: FROM,
+    await sendEmail({
       to: email,
       subject: `SwiftKart Order Update: ${statusLabel}`,
       html: `
@@ -144,9 +194,7 @@ export async function sendTransitNotificationEmail(email, { orderId, status, not
  */
 export async function sendAgentAssignedEmail(email, { orderId, agentName, agentPhone, zone }) {
   try {
-    const resend = getResend();
-    await resend.emails.send({
-      from: FROM,
+    await sendEmail({
       to: email,
       subject: `SwiftKart: Your order is Out for Delivery! 🛵`,
       html: `
@@ -179,3 +227,4 @@ export async function sendAgentAssignedEmail(email, { orderId, agentName, agentP
     console.warn(`[EMAIL] Agent-assigned notification failed to ${email}:`, err.message);
   }
 }
+
