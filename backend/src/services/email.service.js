@@ -56,6 +56,13 @@ async function sendBrevoEmail({ to, subject, html }) {
   const senderEmail = process.env.EMAIL_USER || "chkarthik853@gmail.com";
   const senderName = "SwiftKart";
 
+  if (apiKey.startsWith("xsmtpsib-")) {
+    throw new AppError(
+      "Invalid BREVO_API_KEY: You pasted an SMTP Key ('xsmtpsib-...'). Brevo API requires an API Key (starts with 'xkeysib-...'). Go to Brevo Dashboard -> SMTP & API -> API Keys tab to generate your API Key.",
+      400
+    );
+  }
+
   const res = await fetch("https://api.brevo.com/v3/smtp/email", {
     method: "POST",
     headers: {
