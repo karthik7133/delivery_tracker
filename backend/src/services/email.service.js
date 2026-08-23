@@ -6,7 +6,10 @@ import { AppError } from "../middleware/error.middleware.js";
 
 /* ── Dynamic Transporter selection ── */
 function getTransporter() {
-  if (process.env.EMAIL_USER && process.env.EMAIL_PASSWORD) {
+  const user = process.env.EMAIL_USER;
+  const pass = process.env.EMAIL_PASSWORD || process.env.EMAIL_PASS;
+
+  if (user && pass) {
     const host = process.env.EMAIL_HOST || "smtp.gmail.com";
     const port = Number(process.env.EMAIL_PORT) || 587;
     const secure = port === 465;
@@ -16,8 +19,8 @@ function getTransporter() {
       port,
       secure,
       auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASSWORD,
+        user: user.trim(),
+        pass: pass.trim(),
       },
     });
   }
@@ -26,9 +29,20 @@ function getTransporter() {
 
 function getResend() {
   if (process.env.RESEND_API_KEY) {
-    return new Resend(process.env.RESEND_API_KEY);
+    return new Resend(process.env.RESEND_API_KEY.trim());
   }
   return null;
+}
+
+/** Log active email configuration on load */
+const activeUser = process.env.EMAIL_USER;
+const activePass = process.env.EMAIL_PASSWORD || process.env.EMAIL_PASS;
+if (activeUser && activePass) {
+  console.log(`[EMAIL SERVICE] Configured to use Nodemailer SMTP (${activeUser})`);
+} else if (process.env.RESEND_API_KEY) {
+  console.log(`[EMAIL SERVICE] Configured to use Resend API`);
+} else {
+  console.warn(`[EMAIL SERVICE] WARNING: No email credentials found in environment variables!`);
 }
 
 /**
@@ -38,19 +52,31 @@ async function sendEmail({ to, subject, html }) {
   const nodemailerTransporter = getTransporter();
 
   if (nodemailerTransporter) {
-    const from = process.env.EMAIL_FROM || `SwiftKart <${process.env.EMAIL_USER}>`;
-    const info = await nodemailerTransporter.sendMail({
-      from,
-      to,
-      subject,
-      html,
-    });
-    console.log(`[EMAIL] Nodemailer sent to ${to} (Message ID: ${info.messageId})`);
-    return { messageId: info.messageId };
+    const user = process.env.EMAIL_USER;
+    const from = process.env.EMAIL_FROM || `SwiftKart <${user}>`;
+    try {
+      console.log(`[EMAIL] Sending email via Nodemailer to ${to}...`);
+      const info = await nodemailerTransporter.sendMail({
+        from,
+        to,
+        subject,
+        html,
+      });
+      console.log(`[EMAIL] Nodemailer successfully sent to ${to} (Message ID: ${info.messageId})`);
+      return { messageId: info.messageId };
+    } catch (err) {
+      console.error("[EMAIL] Nodemailer SMTP Error:", err.message);
+      // If RESEND_API_KEY is not set, throw SMTP error directly
+      if (!process.env.RESEND_API_KEY) {
+        throw new AppError(`SMTP Email Error: ${err.message}`, 502);
+      }
+      console.warn("[EMAIL] Nodemailer failed, trying Resend API fallback...");
+    }
   }
 
   const resend = getResend();
   if (resend) {
+    console.log(`[EMAIL] Sending email via Resend to ${to}...`);
     const from = process.env.RESEND_FROM || "SwiftKart <onboarding@resend.dev>";
     const { data, error } = await resend.emails.send({
       from,
@@ -69,7 +95,7 @@ async function sendEmail({ to, subject, html }) {
   }
 
   throw new AppError(
-    "Email service is not configured. Please set EMAIL_USER & EMAIL_PASSWORD or RESEND_API_KEY.",
+    "Email service is not configured. Please set EMAIL_USER and EMAIL_PASSWORD (or EMAIL_PASS) in Render Environment Variables.",
     503
   );
 }
