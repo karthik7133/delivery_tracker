@@ -4,7 +4,13 @@
 
 ---
 
-## 🔗 Live Demo Credentials
+## 🌐 Live Demo
+
+**🔗 Frontend:** [https://deliverytracker7733.netlify.app](https://deliverytracker7733.netlify.app)
+
+---
+
+## 🔗 Demo Credentials
 
 | Role | Email | Password | Access |
 |------|-------|----------|--------|
@@ -88,13 +94,13 @@ Delivers with photo proof → Order DELIVERED
    ┌─────────────────────┐           ┌──────────────────────┐
    │   MongoDB Atlas      │           │  External Services   │
    │   (Mongoose ODM)     │           │  • Cloudinary (imgs) │
-   │   • Users            │           │  • Nodemailer (email)│
-   │   • Orders           │           │  • PincodeAPI.in     │
-   │   • Agents           │           │    (zone lookup)     │
-   │   • Zones            │           └──────────────────────┘
-   │   • RateCards        │
-   │   • TrackingHistory  │
-   └─────────────────────┘
+   │   • Users            │           │  • Brevo HTTP API    │
+   │   • Orders           │           │    (primary email)   │
+   │   • Agents           │           │  • Nodemailer SMTP   │
+   │   • Zones            │           │    (email fallback)  │
+   │   • RateCards        │           │  • PincodeAPI.in     │
+   │   • TrackingHistory  │           │    (zone lookup)     │
+   └─────────────────────┘           └──────────────────────┘
 ```
 
 ---
@@ -124,7 +130,8 @@ Delivers with photo proof → Order DELIVERED
 | JWT | — | Stateless authentication |
 | Multer | — | Multipart file upload middleware |
 | express-validator | — | Request body validation |
-| Nodemailer | — | Email delivery (Gmail SMTP) |
+| Nodemailer | — | Email delivery (Gmail SMTP / fallback) |
+| node-fetch (built-in) | — | Brevo HTTP API calls (Port 443) |
 | Cloudinary SDK | — | Image storage & CDN |
 | bcryptjs | — | Password hashing |
 | express-rate-limit | — | API rate limiting (300 req/15min) |
@@ -136,7 +143,9 @@ Delivers with photo proof → Order DELIVERED
 |---------|---------|
 | MongoDB Atlas | Cloud database |
 | Cloudinary | Delivery proof photo storage |
-| Gmail SMTP (App Password) | Email OTP & notifications |
+| Brevo (Sendinblue) | Primary email provider — HTTP API (Port 443, 300 free emails/day, zero Render timeouts) |
+| Gmail SMTP (App Password) | Secondary email fallback (Nodemailer, Ports 465/587) |
+| Resend API | Final fallback email provider |
 | pincodeapi.in | Live pincode → district mapping for zone routing |
 
 ---
@@ -172,7 +181,7 @@ Delivers with photo proof → Order DELIVERED
 ### 🔐 Authentication
 - **JWT-based** stateless auth (7-day expiry)
 - **Role-based access control** — CUSTOMER, AGENT, ADMIN roles enforced on every route
-- **Email OTP** verification on registration (Gmail SMTP)
+- **Email OTP** verification on registration (Brevo HTTP API → Gmail SMTP fallback → Resend fallback)
 - **Auto-logout** on 401 with redirect to landing page
 - **Password hashing** with bcrypt (salt rounds: 12)
 
@@ -542,14 +551,17 @@ REGISTER:
 1. Check email not already registered
 2. Hash password (bcrypt, 12 rounds)
 3. Create user (isVerified: false)
-4. Generate 6-digit OTP → save to Otp collection (10 min TTL)
-5. Send OTP email via Nodemailer (Gmail SMTP)
+4. Generate 6-digit OTP → save to Otp collection (5 min TTL)
+5. Send OTP email via 3-tier email service:
+   a. Brevo HTTP API (Port 443) — primary, 0% timeout on Render
+   b. Nodemailer SMTP (Port 465/587 with auto-retry) — fallback
+   c. Resend API — last resort
 
 VERIFY OTP:
 1. Find OTP by email + code
 2. Check not expired
 3. Mark user.isVerified = true
-4. Delete OTP document
+4. Delete OTP document (one-time use)
 
 LOGIN:
 1. Find user by email
@@ -662,10 +674,23 @@ SEED_ADMIN_EMAIL=admin@deliverytracker.com
 SEED_ADMIN_PASSWORD=Admin@123
 SEED_ADMIN_PHONE=9000000000
 
-# Gmail SMTP (use App Password — NOT your real Gmail password)
+# Email — Option A: Brevo HTTP API (RECOMMENDED for Render deployment)
+# 300 free emails/day, zero SMTP port-blocking timeouts on cloud platforms
+# Get API Key (starts with xkeysib-) at: https://app.brevo.com/settings/keys/api
+BREVO_API_KEY=xkeysib-your_api_key_here
+
+# Email — Option B: Gmail SMTP via Nodemailer (fallback, may timeout on Render free tier)
+# Use an App Password — NOT your real Gmail password
 # Enable at: https://myaccount.google.com/apppasswords
+EMAIL_HOST=smtp.gmail.com
+EMAIL_PORT=465
 EMAIL_USER=yourname@gmail.com
-EMAIL_PASS=xxxx xxxx xxxx xxxx
+EMAIL_PASSWORD=xxxx xxxx xxxx xxxx
+EMAIL_FROM=SwiftKart <yourname@gmail.com>
+
+# Email — Option C: Resend API (last-resort fallback, requires custom domain for prod)
+RESEND_API_KEY=re_your_key_here
+RESEND_FROM=SwiftKart <onboarding@resend.dev>
 
 # Cloudinary (proof photo uploads)
 # Get credentials at: https://cloudinary.com/console
@@ -673,6 +698,8 @@ CLOUDINARY_CLOUD_NAME=your_cloud_name
 CLOUDINARY_API_KEY=your_api_key
 CLOUDINARY_API_SECRET=your_api_secret
 ```
+
+> **Email Priority Order**: The service checks `BREVO_API_KEY` → `EMAIL_USER + EMAIL_PASSWORD` (Nodemailer) → `RESEND_API_KEY`. Only one needs to be set.
 
 ### Frontend (`frontend/.env`)
 ```env
@@ -808,6 +835,8 @@ delivery_tracker/
 | **Transit simulator** | Auto-advances order status in development so evaluators can see the full timeline without manual DB updates |
 | **Dual payload format in pricing** | `calculateQuote` accepts both `{ package: { length } }` (frontend) and flat `{ length }` (legacy/API tools) — no breaking changes |
 | **Zone pincodes via live API** | Instead of hardcoded lists, pincodes are fetched from pincodeapi.in at setup time, covering every village/mandal in Guntur & Vijayawada |
+| **3-tier email fallback** | Brevo HTTP API (Port 443) is primary — avoids Render's TCP SMTP firewall. Nodemailer (Port 465 with 587 auto-retry) is secondary. Resend is last resort. All three are configurable via env vars |
+| **Port 465 default over 587** | Render free tier blocks outbound Port 587 (STARTTLS). Defaulting to Port 465 (SSL) eliminates `Connection timeout` errors on cloud platforms |
 
 ---
 
